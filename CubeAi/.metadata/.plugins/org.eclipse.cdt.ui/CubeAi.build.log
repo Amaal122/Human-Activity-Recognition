@@ -1,0 +1,10 @@
+15:50:07 **** Incremental Build of configuration Debug for project CubeAi ****
+make -j12 all 
+arm-none-eabi-size  CubeAi.elf 
+   text	   data	    bss	    dec	    hex	filename
+  52415	    112	   4216	  56743	   dda7	CubeAi.elf
+Finished building: default.size.stdout
+ 
+
+15:50:07 Build Finished. 0 errors, 0 warnings. (took 458ms)
+
