@@ -22,6 +22,13 @@ The project currently has two connected parts:
 > yet been integrated into the STM32 firmware for real-time on-device
 > classification.
 
+## Inference output
+
+The current inference workflow reports activity predictions in the serial
+output, including the predicted class and its confidence scores:
+
+![Example inference output](./inference-output.png)
+
 ## Repository layout
 
 ```text
