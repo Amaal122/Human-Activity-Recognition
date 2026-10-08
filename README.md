@@ -27,7 +27,8 @@ The project currently has two connected parts:
 The current inference workflow reports activity predictions in the serial
 output, including the predicted class and its confidence scores:
 
-![Example inference output](./inference-output.png)
+<img width="571" height="357" alt="Capture d&#39;écran 2026-10-08 143536" src="https://github.com/user-attachments/assets/4d05f03d-09ca-4692-9f4c-80dc11c07442" />
+
 
 ## Repository layout
 
