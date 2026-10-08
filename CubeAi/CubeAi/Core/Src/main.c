@@ -24,6 +24,9 @@
 #include "ism330dhcx.h"
 #include "b_u585i_iot02a_bus.h"
 #include <stdio.h>
+#include "ai_platform.h"
+#include "network.h"
+#include "network_data.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,6 +34,21 @@
 ISM330DHCX_Object_t MotionSensor;
 volatile uint32_t dataRdyIntReceived;
 ISM330DHCX_Axes_t acc_axes;
+ai_handle network;
+float aiInData[AI_NETWORK_IN_1_SIZE];
+float aiOutData[AI_NETWORK_OUT_1_SIZE];
+ai_u8
+activations[AI_NETWORK_DATA_ACTIVATIONS_SIZE];
+const char
+* activities[AI_NETWORK_OUT_1_SIZE] =
+{
+"stationary", "walking", "running"
+};
+ai_buffer
+* ai_input;
+ai_buffer
+* ai_output;
+uint32_t write_index;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -59,6 +77,9 @@ PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /* USER CODE BEGIN PV */
 static void MEMS_Init(void);
+static void AI_Init(void);
+static void AI_Run(float *pIn, float *pOut);
+static uint32_t argmax(const float * values, uint32_t len);
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -126,24 +147,41 @@ int main(void)
   /* USER CODE BEGIN 2 */
   dataRdyIntReceived=0;
   MEMS_Init();
+  AI_Init();
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
   while (1)
-    {
+  {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  	  if (dataRdyIntReceived !=0) {
-  	  dataRdyIntReceived = 0;
-  	  ISM330DHCX_ACC_GetAxes(&MotionSensor, &acc_axes);
-  	  printf("% 5d, % 5d, % 5d\r\n", (int) acc_axes.x, (int) acc_axes.y, (int)
-  	  acc_axes.z);
-  	  }
-     }
+    if (dataRdyIntReceived != 0) {
+      dataRdyIntReceived = 0;
+      ISM330DHCX_ACC_GetAxes(&MotionSensor, &acc_axes);
 
+      /* Normalize data to [-1; 1] and accumulate into input buffer */
+      aiInData[write_index + 0] = (float) acc_axes.x / 4000.0f;
+      aiInData[write_index + 1] = (float) acc_axes.y / 4000.0f;
+      aiInData[write_index + 2] = (float) acc_axes.z / 4000.0f;
+      write_index += 3;
+
+      if (write_index == AI_NETWORK_IN_1_SIZE) {
+        write_index = 0;
+        printf("Running inference\r\n");
+        AI_Run(aiInData, aiOutData);
+
+        for (uint32_t i = 0; i < AI_NETWORK_OUT_1_SIZE; i++) {
+          printf("%8.6f ", aiOutData[i]);
+        }
+        uint32_t cls = argmax(aiOutData, AI_NETWORK_OUT_1_SIZE);
+        printf(": %d - %s\r\n", (int) cls, activities[cls]);
+      }
+    }
+  }
   /* USER CODE END 3 */
 }
 
@@ -693,7 +731,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(WRLS_WKUP_B_GPIO_Port, WRLS_WKUP_B_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(WRLS_WKUP_W_GPIO_Port, WRLS_WKUP_W_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOF, GPIO_PIN_11|WRLS_WKUP_W_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : WRLS_FLOW_Pin Mems_VLX_GPIO_Pin Mems_INT_LPS22HH_Pin */
   GPIO_InitStruct.Pin = WRLS_FLOW_Pin|Mems_VLX_GPIO_Pin|Mems_INT_LPS22HH_Pin;
@@ -768,6 +806,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(USB_VBUS_SENSE_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pins : PF11 WRLS_WKUP_W_Pin */
+  GPIO_InitStruct.Pin = GPIO_PIN_11|WRLS_WKUP_W_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+
   /*Configure GPIO pin : PE11 */
   GPIO_InitStruct.Pin = GPIO_PIN_11;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
@@ -782,24 +827,7 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF6_MDF1;
   HAL_GPIO_Init(MIC_SDIN0_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : WRLS_WKUP_W_Pin */
-  GPIO_InitStruct.Pin = WRLS_WKUP_W_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(WRLS_WKUP_W_GPIO_Port, &GPIO_InitStruct);
-
   /* EXTI interrupt init*/
-  /**USART1 GPIO Configuration
-  PA9     ------> USART1_TX
-  PA10    ------> USART1_RX
-  */
-  GPIO_InitStruct.Pin = T_VCP_TX_Pin|T_VCP_RX_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  GPIO_InitStruct.Alternate = GPIO_AF7_USART1;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
   HAL_NVIC_SetPriority(EXTI11_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI11_IRQn);
 
@@ -850,6 +878,46 @@ HAL_UART_Transmit(&huart1, (uint8_t
 *) ptr, len,
 HAL_MAX_DELAY);
 return len;
+}
+static uint32_t argmax(const float * values, uint32_t len)
+{
+float max_value = values[0];
+uint32_t max_index = 0;
+for (uint32_t i = 1; i < len; i++) {
+if (values[i] > max_value) {
+max_value = values[i];
+max_index = i;
+}
+}
+return max_index;
+}
+static void AI_Init(void)
+{
+ai_error err;
+/* Create a local array with the addresses of the activations buffers */
+const ai_handle act_addr[] = { activations };
+/* Create an instance of the model */
+err = ai_network_create_and_init(&network, act_addr, NULL);
+if (err.type != AI_ERROR_NONE) {
+printf("ai_network_create error - type=%d code=%d\r\n", err.type, err.code);
+Error_Handler();
+}
+ai_input = ai_network_inputs_get(network, NULL);
+ai_output = ai_network_outputs_get(network, NULL);
+}
+static void AI_Run(float *pIn, float *pOut)
+{
+ai_i32 batch;
+ai_error err;
+/* Update IO handlers with the data payload */
+ai_input[0].data = AI_HANDLE_PTR(pIn);
+ai_output[0].data = AI_HANDLE_PTR(pOut);
+batch = ai_network_run(network, ai_input, ai_output);
+if (batch != 1) {
+err = ai_network_get_error(network);
+printf("AI ai_network_run error - type=%d code=%d\r\n", err.type, err.code);
+Error_Handler();
+}
 }
 /* USER CODE END 4 */
 
